@@ -1,0 +1,12 @@
+{"inputs": {"messages": [{"role": "user", "content": "Найди статьи про graph retrieval augmented generation"}]}, "outputs": {"route": "search"}}
+{"inputs": {"messages": [{"role": "user", "content": "Что есть по теме mixture of experts в больших языковых моделях?"}]}, "outputs": {"route": "search"}}
+{"inputs": {"messages": [{"role": "user", "content": "Подбери свежие работы про квантизацию LLM"}]}, "outputs": {"route": "search"}}
+{"inputs": {"messages": [{"role": "user", "content": "Сделай конспект статьи 2310.06825"}]}, "outputs": {"route": "summarize"}}
+{"inputs": {"messages": [{"role": "user", "content": "Разбери статью arXiv 1706.03762, в чём её суть?"}]}, "outputs": {"route": "summarize"}}
+{"inputs": {"messages": [{"role": "user", "content": "Кратко перескажи о чём статья 2005.11401"}]}, "outputs": {"route": "summarize"}}
+{"inputs": {"messages": [{"role": "user", "content": "Посчитай прирост: (0.97 - 0.74) / 0.74 * 100"}]}, "outputs": {"route": "calc"}}
+{"inputs": {"messages": [{"role": "user", "content": "Какова разница между 0.91 и 0.88?"}]}, "outputs": {"route": "calc"}}
+{"inputs": {"messages": [{"role": "user", "content": "Во сколько раз 128 больше 32?"}]}, "outputs": {"route": "calc"}}
+{"inputs": {"messages": [{"role": "user", "content": "Привет, чем ты можешь помочь?"}]}, "outputs": {"route": "chat"}}
+{"inputs": {"messages": [{"role": "user", "content": "Спасибо, это было полезно!"}]}, "outputs": {"route": "chat"}}
+{"inputs": {"messages": [{"role": "user", "content": "Что такое arXiv и зачем он нужен?"}]}, "outputs": {"route": "chat"}}

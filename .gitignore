@@ -1,0 +1,7 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.langgraph_api/
+.langgraph/
+langgraph_research_assistant.egg-info

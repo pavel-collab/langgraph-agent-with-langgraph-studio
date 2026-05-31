@@ -1,0 +1,22 @@
+[project]
+name = "langgraph-research-assistant"
+version = "0.1.0"
+description = "Учебный research-ассистент: router + субагенты через create_agent на LangGraph Server"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.3",
+    "langchain>=1.0",
+    "langchain-openai>=0.3",
+    "langgraph-sdk>=0.1",
+    "langgraph-cli[inmem]>=0.2",
+    "arxiv>=2.1",
+    "python-dotenv>=1.0",
+    "pydantic>=2.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
