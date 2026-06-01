@@ -72,6 +72,15 @@ langgraph dockerfile Dockerfile
 В случае, когда мы разворачиваем langgraph server через docker у нас появляется долговременная персистентная память и очередь сообщений за счет postgresql и redis, но мы платим за это
 отсутствием hot reload.
 
+## Backend приложение
+
+Когда мы запускаем langgraph server в prod режиме langgraph studio открывается через браузерный UI
+```
+https://smith.langchain.com/studio/?baseUrl=http://localhost:8123
+```
+
+
+
 ## Подготовка к запуску
 
 ```bash
@@ -89,3 +98,68 @@ langgraph dev
 
 Поднимет LangGraph Server на `http://127.0.0.1:2024` и откроет LangGraph Studio.
 Граф будет доступен под именем `research_assistant` (см. `langgraph.json`).
+
+## Backend и полный стек в docker-compose
+
+Это шаг 5 плана: над графом появляется собственное FastAPI-приложение, которое
+общается с LangGraph Server **по сети через langgraph-sdk** (а не импортирует код
+графа). Наружу мы публикуем только backend; «голый» REST API графа остаётся
+внутри docker-сети.
+
+`docker-compose.yml` поднимает шесть сервисов:
+
+- **postgres**, **redis** — обязательные для прод-режима LangGraph Server
+  (персистентность чекпоинтов и его внутренняя очередь run-ов). Адреса задаются
+  переменными окружения `DATABASE_URI` и `REDIS_URI` сервиса `langgraph-server`.
+- **rabbitmq** — прикладная очередь сообщений, связанная с backend.
+- **langgraph-server** — собирается из `Dockerfile` (сгенерирован
+  `langgraph dockerfile`).
+- **backend-builder** — отдельный контейнер-сборщик: единственная задача —
+  выполнить `uv sync`, сложить готовое виртуальное окружение в том `backend-venv`
+  и завершиться. `backend` и `worker` ждут его (`service_completed_successfully`)
+  и запускаются на уже готовом окружении (`uv run --no-sync`), ничего не собирая.
+- **backend** (FastAPI) и **worker** — используют один и тот же образ `uv` и общий
+  venv-том.
+
+### Как RabbitMQ уживается с Redis у LangGraph Server
+
+Это два РАЗНЫХ слоя очередей, они не конфликтуют:
+
+- **Redis у LangGraph Server** — его *внутренняя* очередь задач. Создаём run через
+  SDK — сервер кладёт его в Redis, а воркеры внутри контейнера `langgraph-api`
+  разбирают. Этот механизм «прибит гвоздями» в библиотеке, заменить его на
+  RabbitMQ нельзя и не нужно.
+- **RabbitMQ у backend** — очередь *прикладного* уровня. Она развязывает HTTP-ручку
+  от тяжёлой работы: ручка публикует задачу и сразу отдаёт `job_id`, а отдельный
+  `worker` забирает её из RabbitMQ и уже сам идёт в LangGraph Server через SDK.
+
+Иначе говоря, RabbitMQ живёт «над» LangGraph, а Redis — «внутри» него; мостом
+между ними служит `worker`. Чтобы прикладные данные не пересекались с внутренней
+очередью LangGraph, backend хранит статусы задач в отдельной логической БД Redis
+(`/1`).
+
+### Запуск
+
+```bash
+cp .env.example .env   # впишите LLM_* и LANGSMITH_API_KEY (их подхватит compose)
+docker compose up --build
+```
+
+- Backend (Swagger): `http://localhost:8000/docs`
+- RabbitMQ (консоль, guest/guest): `http://localhost:15672`
+- REST API графа (для отладки): `http://localhost:8123`
+
+### Ручки backend
+
+```bash
+# Синхронно: backend сам ждёт граф через SDK
+curl -X POST localhost:8000/chat -H 'Content-Type: application/json' \
+  -d '{"message": "Найди свежие статьи про retrieval-augmented generation"}'
+
+# Асинхронно: задача → RabbitMQ → worker → LangGraph
+curl -X POST localhost:8000/chat/async -H 'Content-Type: application/json' \
+  -d '{"message": "Сделай конспект статьи 1706.03762"}'
+# → {"job_id": "...", "status": "queued"}
+
+curl localhost:8000/jobs/<job_id>   # статус/результат
+```

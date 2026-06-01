@@ -1,0 +1,139 @@
+# Полный стек приложения. Два слоя очередей живут рядом и не конфликтуют:
+#
+#   RabbitMQ  — прикладная очередь: ручка backend → worker (наш код).
+#   Redis     — ВНУТРЕННЯЯ очередь LangGraph Server (run-ы графа), не трогаем.
+#
+# Backend наружу публикует только свой REST API; «голый» REST графа от
+# LangGraph Server остаётся внутри docker-сети.
+
+services:
+  # --- Базы для LangGraph Server (требуются им «по умолчанию») --------------
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # --- Прикладная очередь сообщений -----------------------------------------
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # веб-консоль управления (guest/guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # --- LangGraph Server (прод-режим, собирается из нашего Dockerfile) -------
+  langgraph-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8123:8000"  # REST API графа (для отладки; пользователю не отдаём)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Здесь и есть тот самый ответ «на каких хостах/портах БД»: LangGraph
+      # Server берёт адреса своих Postgres и Redis из переменных окружения.
+      DATABASE_URI: postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
+      REDIS_URI: redis://redis:6379
+      # Ключ LangSmith нужен прод-образу langgraph-api для лицензии/трассировки.
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-research-assistant}
+      # Параметры модели — их читает make_model внутри графа.
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_KEY: ${LLM_KEY}
+      LLM_NAME: ${LLM_NAME:-gpt-4o-mini}
+
+  # --- Сборщик окружения backend: только uv sync, потом умирает -------------
+  # Кладёт виртуальное окружение в том backend-venv. backend и worker
+  # переиспользуют этот готовый venv и сами ничего не собирают.
+  backend-builder:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    working_dir: /app
+    environment:
+      UV_LINK_MODE: copy            # том — другое устройство, hardlink не выйдет
+      UV_PROJECT_ENVIRONMENT: /app/.venv
+    volumes:
+      - ./backend:/app
+      - backend-venv:/app/.venv
+    command: ["uv", "sync"]
+    restart: "no"
+
+  # --- FastAPI backend (наружный API) ---------------------------------------
+  backend:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    working_dir: /app
+    environment:
+      UV_PROJECT_ENVIRONMENT: /app/.venv
+      LANGGRAPH_URL: http://langgraph-server:8000
+      GRAPH_ID: research_assistant
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      REDIS_URL: redis://redis:6379/1
+    volumes:
+      - ./backend:/app
+      - backend-venv:/app/.venv
+    ports:
+      - "8000:8000"
+    depends_on:
+      backend-builder:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      langgraph-server:
+        condition: service_started
+    # --no-sync: окружение уже собрал builder, повторно не синхронизируем.
+    command: ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  # --- Worker: RabbitMQ → LangGraph SDK -------------------------------------
+  worker:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    working_dir: /app
+    environment:
+      UV_PROJECT_ENVIRONMENT: /app/.venv
+      LANGGRAPH_URL: http://langgraph-server:8000
+      GRAPH_ID: research_assistant
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      REDIS_URL: redis://redis:6379/1
+    volumes:
+      - ./backend:/app
+      - backend-venv:/app/.venv
+    depends_on:
+      backend-builder:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      langgraph-server:
+        condition: service_started
+    command: ["uv", "run", "--no-sync", "python", "-m", "app.worker"]
+
+volumes:
+  postgres-data:
+  backend-venv:

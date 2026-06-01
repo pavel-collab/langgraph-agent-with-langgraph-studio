@@ -1,0 +1,18 @@
+[project]
+name = "research-assistant-backend"
+version = "0.1.0"
+description = "Демонстрационный FastAPI backend поверх LangGraph Server (общается через langgraph-sdk)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "langgraph-sdk>=0.1",
+    "aio-pika>=9.4",
+    "redis>=5.0",
+    "pydantic-settings>=2.0",
+]
+
+# Это приложение, а не библиотека: сам проект как пакет ставить не нужно —
+# uv sync поставит только зависимости (никакого build backend не требуется).
+[tool.uv]
+package = false
