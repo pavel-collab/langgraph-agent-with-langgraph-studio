@@ -2,7 +2,7 @@
 name = "langgraph-research-assistant"
 version = "0.1.0"
 description = "Учебный research-ассистент: router + субагенты через create_agent на LangGraph Server"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "langgraph>=0.3",
     "langchain>=1.0",

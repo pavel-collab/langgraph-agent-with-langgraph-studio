@@ -23,7 +23,11 @@ import arxiv
 from langchain_core.tools import tool
 
 # Один общий клиент arxiv на модуль — он сам управляет паузами между запросами.
-_arxiv_client = arxiv.Client()
+# page_size=5: не тянем по 100 записей на страницу (так запрос «легче» для
+#   рейт-лимитера arXiv и в URL уходит max_results=5, а не 100).
+# delay_seconds=3.0: arXiv просит не чаще одного запроса в 3 с.
+# num_retries=5: при временном 429/5xx клиент сам повторит с паузой.
+_arxiv_client = arxiv.Client(page_size=5, delay_seconds=3.0, num_retries=5)
 
 
 @tool
@@ -41,7 +45,17 @@ def search_arxiv(query: str, max_results: int = 5) -> str:
         max_results=max_results,
         sort_by=arxiv.SortCriterion.Relevance,
     )
-    results = list(_arxiv_client.results(search))
+    try:
+        results = list(_arxiv_client.results(search))
+    except arxiv.HTTPError as exc:
+        # 429 = arXiv троттлит наш IP (слишком частые запросы). Не роняем граф —
+        # возвращаем агенту понятный текст, чтобы он мог ответить пользователю.
+        if exc.status == 429:
+            return (
+                "arXiv временно ограничил частоту запросов (HTTP 429). "
+                "Подождите минуту и повторите запрос."
+            )
+        return f"Ошибка обращения к arXiv (HTTP {exc.status}). Повторите позже."
     if not results:
         return f"По запросу «{query}» ничего не найдено."
 
@@ -77,6 +91,13 @@ def get_paper_details(arxiv_id: str) -> str:
         paper = next(_arxiv_client.results(search))
     except StopIteration:
         return f"Статья с id «{arxiv_id}» не найдена."
+    except arxiv.HTTPError as exc:
+        if exc.status == 429:
+            return (
+                "arXiv временно ограничил частоту запросов (HTTP 429). "
+                "Подождите минуту и повторите запрос."
+            )
+        return f"Ошибка обращения к arXiv (HTTP {exc.status}). Повторите позже."
 
     authors = ", ".join(a.name for a in paper.authors)
     date = paper.published.strftime("%Y-%m-%d")
